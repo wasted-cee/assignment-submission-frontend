@@ -240,18 +240,37 @@ export const StudentDashboard = () => {
 
 export const TeacherDashboard = () => {
   const [assignments, setAssignments] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [selectedModal, setSelectedModal] = useState(null);
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [sortBy, setSortBy] = useState('deadline');
   const [formData, setFormData] = useState({ title: '', description: '', deadline: '' });
 
   useEffect(() => {
-    fetchAssignments();
+    fetchData();
   }, []);
 
-  const fetchAssignments = async () => {
+  const fetchData = async () => {
     try {
-      const response = await assignmentsAPI.getAll();
-      setAssignments(response.data);
+      setLoading(true);
+      const assignmentsResponse = await assignmentsAPI.getAll();
+      setAssignments(assignmentsResponse.data);
+
+      // Fetch submissions for all assignments
+      const allSubmissions = [];
+      for (const assignment of assignmentsResponse.data) {
+        try {
+          const submissionsResponse = await submissionsAPI.getForAssignment(assignment.id);
+          allSubmissions.push(...(submissionsResponse.data || []));
+        } catch (error) {
+          console.warn(`Could not fetch submissions for assignment ${assignment.id}:`, error);
+        }
+      }
+      setSubmissions(allSubmissions);
     } catch (error) {
       console.error('Failed to fetch assignments', error);
     } finally {
@@ -259,29 +278,161 @@ export const TeacherDashboard = () => {
     }
   };
 
+  const isAssignmentActive = (deadline) => {
+    return new Date(deadline) >= new Date();
+  };
+
+  const getFilteredAndSortedAssignments = () => {
+    let filtered = assignments;
+
+    if (filterStatus === 'active') {
+      filtered = filtered.filter(a => isAssignmentActive(a.deadline));
+    } else if (filterStatus === 'ended') {
+      filtered = filtered.filter(a => !isAssignmentActive(a.deadline));
+    }
+
+    let sorted = [...filtered];
+    if (sortBy === 'deadline') {
+      sorted.sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
+    } else if (sortBy === 'created') {
+      sorted.sort((a, b) => new Date(b.createdAt || b.id) - new Date(a.createdAt || a.id));
+    } else if (sortBy === 'submissions') {
+      sorted.sort((a, b) => {
+        const aCount = getSubmissionCountForAssignment(b.id);
+        const bCount = getSubmissionCountForAssignment(a.id);
+        return aCount - bCount;
+      });
+    }
+
+    return sorted;
+  };
+
+  const getSubmissionCountForAssignment = (assignmentId) => {
+    return submissions.filter(s => s.assignmentId === assignmentId).length;
+  };
+
+  const getStatistics = () => {
+    const total = assignments.length;
+    const active = assignments.filter(a => isAssignmentActive(a.deadline)).length;
+    const ended = total - active;
+    const totalSubmissions = submissions.length;
+    const graded = submissions.filter(s => s.grade !== null && s.grade !== undefined).length;
+    const pending = totalSubmissions - graded;
+
+    return { total, active, ended, totalSubmissions, graded, pending };
+  };
+
   const handleCreateAssignment = async (e) => {
     e.preventDefault();
     try {
-      await assignmentsAPI.create(formData);
+      if (editingId) {
+        await assignmentsAPI.update(editingId, formData);
+        setEditingId(null);
+      } else {
+        await assignmentsAPI.create(formData);
+      }
       setFormData({ title: '', description: '', deadline: '' });
       setShowCreateForm(false);
-      fetchAssignments();
+      setShowConfirmation(true);
+      setTimeout(() => setShowConfirmation(false), 3000);
+      fetchData();
     } catch (error) {
-      console.error('Failed to create assignment', error);
+      console.error('Failed to save assignment', error);
     }
+  };
+
+  const handleDeleteAssignment = async (id) => {
+    if (window.confirm('Are you sure you want to delete this assignment?')) {
+      try {
+        await assignmentsAPI.delete(id);
+        fetchData();
+      } catch (error) {
+        console.error('Failed to delete assignment', error);
+      }
+    }
+  };
+
+  const handleEditAssignment = (assignment) => {
+    setEditingId(assignment.id);
+    setFormData({
+      title: assignment.title,
+      description: assignment.description,
+      deadline: assignment.deadline.slice(0, 16)
+    });
+    setShowCreateForm(true);
+  };
+
+  const handleCancel = () => {
+    setShowCreateForm(false);
+    setEditingId(null);
+    setFormData({ title: '', description: '', deadline: '' });
+  };
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   if (loading) return <div className="loading">Loading...</div>;
 
+  const stats = getStatistics();
+  const filteredAssignments = getFilteredAndSortedAssignments();
+
   return (
     <div className="dashboard">
       <h1>Teacher Dashboard</h1>
-      <button onClick={() => setShowCreateForm(!showCreateForm)} className="btn-primary">
-        {showCreateForm ? 'Cancel' : 'Create Assignment'}
-      </button>
 
+      {/* Statistics Section */}
+      <div className="stats-grid">
+        <div className="stat-card">
+          <div className="stat-value">{stats.total}</div>
+          <div className="stat-label">Total Assignments</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats.active}</div>
+          <div className="stat-label">Active</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats.ended}</div>
+          <div className="stat-label">Ended</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats.totalSubmissions}</div>
+          <div className="stat-label">Total Submissions</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats.graded}</div>
+          <div className="stat-label">Graded</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats.pending}</div>
+          <div className="stat-label">Pending Grading</div>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="action-bar">
+        <button onClick={() => setShowCreateForm(!showCreateForm)} className="btn-primary">
+          {showCreateForm ? 'Cancel' : '+ Create Assignment'}
+        </button>
+      </div>
+
+      {/* Confirmation Message */}
+      {showConfirmation && (
+        <div className="confirmation-message">
+          ✓ {editingId ? 'Assignment updated' : 'Assignment created'} successfully!
+        </div>
+      )}
+
+      {/* Create/Edit Form */}
       {showCreateForm && (
         <form onSubmit={handleCreateAssignment} className="create-form">
+          <h3>{editingId ? 'Edit Assignment' : 'Create New Assignment'}</h3>
           <input
             type="text"
             placeholder="Title"
@@ -301,26 +452,182 @@ export const TeacherDashboard = () => {
             onChange={(e) => setFormData({ ...formData, deadline: e.target.value })}
             required
           />
-          <button type="submit">Create</button>
+          <div className="form-buttons">
+            <button type="submit" className="btn-save">
+              {editingId ? 'Update Assignment' : 'Create Assignment'}
+            </button>
+            <button type="button" className="btn-cancel" onClick={handleCancel}>
+              Cancel
+            </button>
+          </div>
         </form>
       )}
 
+      {/* Filter and Sort Controls */}
+      <div className="controls-bar">
+        <div className="control-group">
+          <label htmlFor="filterStatus">Filter by Status:</label>
+          <select
+            id="filterStatus"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="control-select"
+          >
+            <option value="all">All Assignments</option>
+            <option value="active">Active</option>
+            <option value="ended">Ended</option>
+          </select>
+        </div>
+
+        <div className="control-group">
+          <label htmlFor="sortBy">Sort by:</label>
+          <select
+            id="sortBy"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="control-select"
+          >
+            <option value="deadline">Deadline (nearest first)</option>
+            <option value="created">Creation Date (newest first)</option>
+            <option value="submissions">Submission Count</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Assignments List */}
       <div className="assignments-list">
-        {assignments.length === 0 ? (
-          <p>No assignments created</p>
+        {filteredAssignments.length === 0 ? (
+          <p className="no-data">
+            {assignments.length === 0 
+              ? 'No assignments created yet.' 
+              : 'No assignments match the selected filters.'}
+          </p>
         ) : (
-          assignments.map((assignment) => (
-            <div key={assignment.id} className="assignment-card">
-              <h3>{assignment.title}</h3>
-              <p>{assignment.description}</p>
-              <p className="deadline">Deadline: {new Date(assignment.deadline).toLocaleDateString()}</p>
-              <button onClick={() => window.location.href = `/assignment/${assignment.id}/submissions`}>
-                View Submissions
-              </button>
-            </div>
-          ))
+          filteredAssignments.map((assignment) => {
+            const submissionCount = getSubmissionCountForAssignment(assignment.id);
+            const isActive = isAssignmentActive(assignment.deadline);
+
+            return (
+              <div key={assignment.id} className="assignment-card teacher-card">
+                <div className="card-header">
+                  <div>
+                    <h3>{assignment.title}</h3>
+                    <span className={`status-badge ${isActive ? 'badge-active' : 'badge-ended'}`}>
+                      {isActive ? 'Active' : 'Ended'}
+                    </span>
+                  </div>
+                  <div className="card-actions">
+                    <button
+                      className="btn-icon btn-view"
+                      onClick={() => setSelectedModal(assignment.id)}
+                      title="View details"
+                    >
+                      👁️
+                    </button>
+                    <button
+                      className="btn-icon btn-edit"
+                      onClick={() => handleEditAssignment(assignment)}
+                      title="Edit assignment"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      className="btn-icon btn-delete"
+                      onClick={() => handleDeleteAssignment(assignment.id)}
+                      title="Delete assignment"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+
+                <p className="description">{assignment.description}</p>
+
+                <p className={`deadline ${!isActive ? 'overdue' : ''}`}>
+                  📅 Deadline: {formatDate(assignment.deadline)}
+                </p>
+
+                <div className="submission-stats">
+                  <div className="stat-item">
+                    <span className="stat-count">{submissionCount}</span>
+                    <span className="stat-text">Submission{submissionCount !== 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => window.location.href = `/assignment/${assignment.id}/submissions`}
+                  className="btn-view-submissions"
+                >
+                  View Submissions ({submissionCount})
+                </button>
+              </div>
+            );
+          })
         )}
       </div>
+
+      {/* Detail Modal */}
+      {selectedModal && (
+        <div className="modal-overlay" onClick={() => setSelectedModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            {assignments.map(a => a.id === selectedModal ? (
+              <div key={a.id}>
+                <div className="modal-header">
+                  <h2>{a.title}</h2>
+                  <button className="modal-close" onClick={() => setSelectedModal(null)}>×</button>
+                </div>
+                <div className="modal-body">
+                  <div className="modal-section">
+                    <h4>Description</h4>
+                    <p>{a.description}</p>
+                  </div>
+                  <div className="modal-section">
+                    <h4>Deadline</h4>
+                    <p>{formatDate(a.deadline)}</p>
+                  </div>
+                  <div className="modal-section">
+                    <h4>Assignment Status</h4>
+                    <p>
+                      <span className={`status-badge ${isAssignmentActive(a.deadline) ? 'badge-active' : 'badge-ended'}`}>
+                        {isAssignmentActive(a.deadline) ? 'Active' : 'Ended'}
+                      </span>
+                    </p>
+                  </div>
+                  <div className="modal-section">
+                    <h4>Submission Statistics</h4>
+                    <div className="submission-breakdown">
+                      <div className="breakdown-item">
+                        <span className="breakdown-label">Total Submissions:</span>
+                        <span className="breakdown-value">{getSubmissionCountForAssignment(a.id)}</span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span className="breakdown-label">Graded:</span>
+                        <span className="breakdown-value">
+                          {submissions.filter(s => s.assignmentId === a.id && s.grade !== null && s.grade !== undefined).length}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span className="breakdown-label">Pending Grading:</span>
+                        <span className="breakdown-value">
+                          {submissions.filter(s => s.assignmentId === a.id && (s.grade === null || s.grade === undefined)).length}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button 
+                    onClick={() => window.location.href = `/assignment/${a.id}/submissions`}
+                    className="btn-primary"
+                  >
+                    View All Submissions
+                  </button>
+                </div>
+              </div>
+            ) : null)}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
