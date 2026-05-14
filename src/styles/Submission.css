@@ -1,0 +1,55 @@
+.submission-container {
+  max-width: 600px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.submission-form {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.submission-form h2 {
+  color: var(--dark-bg);
+  margin-top: 0;
+}
+
+.submission-form input[type="file"] {
+  width: 100%;
+  padding: 0.75rem;
+  margin-bottom: 1.5rem;
+  border: 2px dashed var(--primary-color);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.submission-form button {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: var(--secondary-color);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.submission-form button:hover {
+  background-color: #27ae60;
+}
+
+.submission-form button:disabled {
+  background-color: #95a5a6;
+  cursor: not-allowed;
+}
+
+.success-message {
+  background-color: var(--secondary-color);
+  color: white;
+  padding: 1rem;
+  border-radius: 4px;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
